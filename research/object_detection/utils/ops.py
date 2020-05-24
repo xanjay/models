@@ -31,6 +31,13 @@ from object_detection.utils import shape_utils
 from object_detection.utils import spatial_transform_ops as spatial_ops
 from object_detection.utils import static_shape
 
+# pylint: disable=g-import-not-at-top
+try:
+  from tensorflow.contrib import framework as contrib_framework
+except ImportError:
+  # TF 2.0 doesn't ship with contrib.
+  pass
+# pylint: enable=g-import-not-at-top
 
 matmul_crop_and_resize = spatial_ops.matmul_crop_and_resize
 multilevel_roi_align = spatial_ops.multilevel_roi_align
@@ -588,8 +595,9 @@ def normalize_to_target(inputs,
       initial_norm = depth * [target_norm_value]
     else:
       initial_norm = target_norm_value
-    target_norm = tf.contrib.framework.model_variable(
-        name='weights', dtype=tf.float32,
+    target_norm = contrib_framework.model_variable(
+        name='weights',
+        dtype=tf.float32,
         initializer=tf.constant(initial_norm, dtype=tf.float32),
         trainable=trainable)
     if summarize:
@@ -967,9 +975,8 @@ def nearest_neighbor_upsampling(input_tensor, scale=None, height_scale=None,
     w_scale = scale if width_scale is None else width_scale
     (batch_size, height, width,
      channels) = shape_utils.combined_static_and_dynamic_shape(input_tensor)
-    output_tensor = tf.reshape(
-        input_tensor, [batch_size, height, 1, width, 1, channels]) * tf.ones(
-            [1, 1, h_scale, 1, w_scale, 1], dtype=input_tensor.dtype)
+    output_tensor = tf.stack([input_tensor] * w_scale, axis=3)
+    output_tensor = tf.stack([output_tensor] * h_scale, axis=2)
     return tf.reshape(output_tensor,
                       [batch_size, height * h_scale, width * w_scale, channels])
 

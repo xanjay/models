@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2017 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,8 +16,14 @@
 
 """Tests for object_detection.predictors.convolutional_box_predictor."""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 from absl.testing import parameterized
 import numpy as np
+from six.moves import range
+from six.moves import zip
 import tensorflow as tf
 
 from google.protobuf import text_format
@@ -198,7 +205,7 @@ class ConvolutionalBoxPredictorTest(test_case.TestCase):
             max_depth=32,
             num_layers_before_predictor=1,
             dropout_keep_prob=0.8,
-            kernel_size=1,
+            kernel_size=3,
             box_code_size=4,
             use_dropout=True,
             use_depthwise=True))
@@ -250,7 +257,7 @@ class ConvolutionalBoxPredictorTest(test_case.TestCase):
             max_depth=32,
             num_layers_before_predictor=1,
             dropout_keep_prob=0.8,
-            kernel_size=1,
+            kernel_size=3,
             box_code_size=4,
             use_dropout=True,
             use_depthwise=True))

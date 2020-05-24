@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2017 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,15 +19,22 @@
 Based on PNASNet model: https://arxiv.org/abs/1712.00559
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+from six.moves import range
 import tensorflow as tf
+from tensorflow.contrib import framework as contrib_framework
+from tensorflow.contrib import slim as contrib_slim
 
 from object_detection.meta_architectures import faster_rcnn_meta_arch
 from object_detection.utils import variables_helper
 from nets.nasnet import nasnet_utils
 from nets.nasnet import pnasnet
 
-arg_scope = tf.contrib.framework.arg_scope
-slim = tf.contrib.slim
+arg_scope = contrib_framework.arg_scope
+slim = contrib_slim
 
 
 def pnasnet_large_arg_scope_for_detection(is_batch_norm_training=False):

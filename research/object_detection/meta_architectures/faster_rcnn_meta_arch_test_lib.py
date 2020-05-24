@@ -18,6 +18,7 @@ import functools
 from absl.testing import parameterized
 
 import numpy as np
+import six
 import tensorflow as tf
 
 from google.protobuf import text_format
@@ -37,7 +38,14 @@ from object_detection.utils import ops
 from object_detection.utils import test_case
 from object_detection.utils import test_utils
 
-slim = tf.contrib.slim
+# pylint: disable=g-import-not-at-top
+try:
+  from tensorflow.contrib import slim as contrib_slim
+except ImportError:
+  # TF 2.0 doesn't ship with contrib.
+  pass
+# pylint: enable=g-import-not-at-top
+
 BOX_CODE_SIZE = 4
 
 
@@ -57,14 +65,14 @@ class FakeFasterRCNNFeatureExtractor(
 
   def _extract_proposal_features(self, preprocessed_inputs, scope):
     with tf.variable_scope('mock_model'):
-      proposal_features = 0 * slim.conv2d(
+      proposal_features = 0 * contrib_slim.conv2d(
           preprocessed_inputs, num_outputs=3, kernel_size=1, scope='layer1')
       return proposal_features, {}
 
   def _extract_box_classifier_features(self, proposal_feature_maps, scope):
     with tf.variable_scope('mock_model'):
-      return 0 * slim.conv2d(proposal_feature_maps,
-                             num_outputs=3, kernel_size=1, scope='layer2')
+      return 0 * contrib_slim.conv2d(
+          proposal_feature_maps, num_outputs=3, kernel_size=1, scope='layer2')
 
 
 class FakeFasterRCNNKerasFeatureExtractor(
@@ -118,27 +126,30 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
     text_format.Merge(hyperparams_text_proto, hyperparams)
     return hyperparams_builder.KerasLayerHyperparams(hyperparams)
 
-  def _get_second_stage_box_predictor_text_proto(self):
+  def _get_second_stage_box_predictor_text_proto(
+      self, share_box_across_classes=False):
+    share_box_field = 'true' if share_box_across_classes else 'false'
     box_predictor_text_proto = """
-      mask_rcnn_box_predictor {
-        fc_hyperparams {
+      mask_rcnn_box_predictor {{
+        fc_hyperparams {{
           op: FC
           activation: NONE
-          regularizer {
-            l2_regularizer {
+          regularizer {{
+            l2_regularizer {{
               weight: 0.0005
-            }
-          }
-          initializer {
-            variance_scaling_initializer {
+            }}
+          }}
+          initializer {{
+            variance_scaling_initializer {{
               factor: 1.0
               uniform: true
               mode: FAN_AVG
-            }
-          }
-        }
-      }
-    """
+            }}
+          }}
+        }}
+        share_box_across_classes: {share_box_across_classes}
+      }}
+    """.format(share_box_across_classes=share_box_field)
     return box_predictor_text_proto
 
   def _add_mask_to_second_stage_box_predictor_text_proto(
@@ -169,10 +180,11 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
 
   def _get_second_stage_box_predictor(self, num_classes, is_training,
                                       predict_masks, masks_are_class_agnostic,
+                                      share_box_across_classes=False,
                                       use_keras=False):
     box_predictor_proto = box_predictor_pb2.BoxPredictor()
-    text_format.Merge(self._get_second_stage_box_predictor_text_proto(),
-                      box_predictor_proto)
+    text_format.Merge(self._get_second_stage_box_predictor_text_proto(
+        share_box_across_classes), box_predictor_proto)
     if predict_masks:
       text_format.Merge(
           self._add_mask_to_second_stage_box_predictor_text_proto(
@@ -219,7 +231,10 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                    clip_anchors_to_image=False,
                    use_matmul_gather_in_matcher=False,
                    use_static_shapes=False,
-                   calibration_mapping_value=None):
+                   calibration_mapping_value=None,
+                   share_box_across_classes=False,
+                   return_raw_detections_during_predict=False,
+                   output_final_box_features=False):
 
     def image_resizer_fn(image, masks=None):
       """Fake image resizer function."""
@@ -365,45 +380,70 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
         ops.matmul_crop_and_resize
         if use_matmul_crop_and_resize else ops.native_crop_and_resize)
     common_kwargs = {
-        'is_training': is_training,
-        'num_classes': num_classes,
-        'image_resizer_fn': image_resizer_fn,
-        'feature_extractor': fake_feature_extractor,
-        'number_of_stages': number_of_stages,
-        'first_stage_anchor_generator': first_stage_anchor_generator,
-        'first_stage_target_assigner': first_stage_target_assigner,
-        'first_stage_atrous_rate': first_stage_atrous_rate,
+        'is_training':
+            is_training,
+        'num_classes':
+            num_classes,
+        'image_resizer_fn':
+            image_resizer_fn,
+        'feature_extractor':
+            fake_feature_extractor,
+        'number_of_stages':
+            number_of_stages,
+        'first_stage_anchor_generator':
+            first_stage_anchor_generator,
+        'first_stage_target_assigner':
+            first_stage_target_assigner,
+        'first_stage_atrous_rate':
+            first_stage_atrous_rate,
         'first_stage_box_predictor_arg_scope_fn':
-        first_stage_box_predictor_arg_scope_fn,
+            first_stage_box_predictor_arg_scope_fn,
         'first_stage_box_predictor_kernel_size':
-        first_stage_box_predictor_kernel_size,
-        'first_stage_box_predictor_depth': first_stage_box_predictor_depth,
-        'first_stage_minibatch_size': first_stage_minibatch_size,
-        'first_stage_sampler': first_stage_sampler,
+            first_stage_box_predictor_kernel_size,
+        'first_stage_box_predictor_depth':
+            first_stage_box_predictor_depth,
+        'first_stage_minibatch_size':
+            first_stage_minibatch_size,
+        'first_stage_sampler':
+            first_stage_sampler,
         'first_stage_non_max_suppression_fn':
-        first_stage_non_max_suppression_fn,
-        'first_stage_max_proposals': first_stage_max_proposals,
+            first_stage_non_max_suppression_fn,
+        'first_stage_max_proposals':
+            first_stage_max_proposals,
         'first_stage_localization_loss_weight':
-        first_stage_localization_loss_weight,
+            first_stage_localization_loss_weight,
         'first_stage_objectness_loss_weight':
-        first_stage_objectness_loss_weight,
-        'second_stage_target_assigner': second_stage_target_assigner,
-        'second_stage_batch_size': second_stage_batch_size,
-        'second_stage_sampler': second_stage_sampler,
+            first_stage_objectness_loss_weight,
+        'second_stage_target_assigner':
+            second_stage_target_assigner,
+        'second_stage_batch_size':
+            second_stage_batch_size,
+        'second_stage_sampler':
+            second_stage_sampler,
         'second_stage_non_max_suppression_fn':
-        second_stage_non_max_suppression_fn,
-        'second_stage_score_conversion_fn': second_stage_score_conversion_fn,
+            second_stage_non_max_suppression_fn,
+        'second_stage_score_conversion_fn':
+            second_stage_score_conversion_fn,
         'second_stage_localization_loss_weight':
-        second_stage_localization_loss_weight,
+            second_stage_localization_loss_weight,
         'second_stage_classification_loss_weight':
-        second_stage_classification_loss_weight,
+            second_stage_classification_loss_weight,
         'second_stage_classification_loss':
-        second_stage_classification_loss,
-        'hard_example_miner': hard_example_miner,
-        'crop_and_resize_fn': crop_and_resize_fn,
-        'clip_anchors_to_image': clip_anchors_to_image,
-        'use_static_shapes': use_static_shapes,
-        'resize_masks': True,
+            second_stage_classification_loss,
+        'hard_example_miner':
+            hard_example_miner,
+        'crop_and_resize_fn':
+            crop_and_resize_fn,
+        'clip_anchors_to_image':
+            clip_anchors_to_image,
+        'use_static_shapes':
+            use_static_shapes,
+        'resize_masks':
+            True,
+        'return_raw_detections_during_predict':
+            return_raw_detections_during_predict,
+        'output_final_box_features':
+            output_final_box_features
     }
 
     return self._get_model(
@@ -412,7 +452,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
             is_training=is_training,
             use_keras=use_keras,
             predict_masks=predict_masks,
-            masks_are_class_agnostic=masks_are_class_agnostic), **common_kwargs)
+            masks_are_class_agnostic=masks_are_class_agnostic,
+            share_box_across_classes=share_box_across_classes), **common_kwargs)
 
   @parameterized.parameters(
       {'use_static_shapes': False, 'use_keras': True},
@@ -538,7 +579,7 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
       expected_output_keys = set([
           'rpn_box_predictor_features', 'rpn_features_to_crop', 'image_shape',
           'rpn_box_encodings', 'rpn_objectness_predictions_with_background',
-          'anchors'])
+          'anchors', 'feature_maps'])
       # At training time, anchors that exceed image bounds are pruned.  Thus
       # the `expected_num_anchors` in the above inference mode test is now
       # a strict upper bound on the number of anchors.
@@ -612,7 +653,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                           expected_output_shapes['proposal_boxes_normalized'])
       self.assertAllEqual(results[11].shape,
                           expected_output_shapes['box_classifier_features'])
-
+      self.assertAllEqual(results[12].shape,
+                          expected_output_shapes['final_anchors'])
     batch_size = 2
     image_size = 10
     max_num_proposals = 8
@@ -648,7 +690,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
               prediction_dict['num_proposals'],
               prediction_dict['proposal_boxes'],
               prediction_dict['proposal_boxes_normalized'],
-              prediction_dict['box_classifier_features'])
+              prediction_dict['box_classifier_features'],
+              prediction_dict['final_anchors'])
 
     expected_num_anchors = image_size * image_size * 3 * 3
     expected_shapes = {
@@ -671,7 +714,9 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                                                 max_num_proposals,
                                                 initial_crop_size,
                                                 maxpool_stride,
-                                                3)
+                                                3),
+        'feature_maps': [(2, image_size, image_size, 512)],
+        'final_anchors': (2, max_num_proposals, 4)
     }
 
     if use_static_shapes:
@@ -702,6 +747,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
         self.assertEqual(set(tensor_dict_out.keys()),
                          set(expected_shapes.keys()))
         for key in expected_shapes:
+          if isinstance(tensor_dict_out[key], list):
+            continue
           self.assertAllEqual(tensor_dict_out[key].shape, expected_shapes[key])
 
   @parameterized.parameters(
@@ -748,7 +795,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
               result_tensor_dict['rpn_objectness_predictions_with_background'],
               result_tensor_dict['rpn_features_to_crop'],
               result_tensor_dict['rpn_box_predictor_features'],
-              updates
+              updates,
+              result_tensor_dict['final_anchors'],
              )
 
     image_shape = (batch_size, image_size, image_size, 3)
@@ -785,7 +833,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                 image_size, batch_size, max_num_proposals, initial_crop_size,
                 maxpool_stride, 3),
         'rpn_objectness_predictions_with_background':
-        (2, image_size * image_size * 9, 2)
+        (2, image_size * image_size * 9, 2),
+        'final_anchors': (2, max_num_proposals, 4)
     }
     # TODO(rathodv): Possibly change utils/test_case.py to accept dictionaries
     # and return dicionaries so don't have to rely on the order of tensors.
@@ -805,6 +854,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                         expected_shapes['rpn_features_to_crop'])
     self.assertAllEqual(results[8].shape,
                         expected_shapes['rpn_box_predictor_features'])
+    self.assertAllEqual(results[10].shape,
+                        expected_shapes['final_anchors'])
 
   @parameterized.parameters(
       {'use_static_shapes': False, 'pad_to_max_dimension': None,
@@ -846,12 +897,13 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
           use_matmul_gather_in_matcher=use_static_shapes,
           first_stage_max_proposals=first_stage_max_proposals,
           pad_to_max_dimension=pad_to_max_dimension)
-      _, true_image_shapes = model.preprocess(images)
+      preprocessed_images, true_image_shapes = model.preprocess(images)
       proposals = model.postprocess({
           'rpn_box_encodings': rpn_box_encodings,
           'rpn_objectness_predictions_with_background':
           rpn_objectness_predictions_with_background,
           'rpn_features_to_crop': rpn_features_to_crop,
+          'image_shape': tf.shape(preprocessed_images),
           'anchors': anchors}, true_image_shapes)
       return (proposals['num_detections'], proposals['detection_boxes'],
               proposals['detection_scores'], proposals['raw_detection_boxes'],
@@ -904,6 +956,12 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                                     [0.5, 0., 1., 0.5], [0.5, 0.5, 1., 1.]]]
     expected_raw_scores = [[[0., 1.], [1., 0.], [1., 0.], [0., 1.]],
                            [[1., 0.], [0., 1.], [0., 1.], [1., 0.]]]
+
+    if pad_to_max_dimension is not None:
+      expected_raw_proposal_boxes = (np.array(expected_raw_proposal_boxes) *
+                                     32 / pad_to_max_dimension)
+      expected_proposal_boxes = (np.array(expected_proposal_boxes) *
+                                 32 / pad_to_max_dimension)
 
     self.assertAllClose(results[0], expected_num_proposals)
     for indx, num_proposals in enumerate(expected_num_proposals):
@@ -962,7 +1020,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
         'rpn_objectness_predictions_with_background':
         rpn_objectness_predictions_with_background,
         'rpn_features_to_crop': rpn_features_to_crop,
-        'anchors': anchors}, true_image_shapes)
+        'anchors': anchors,
+        'image_shape': image_shape}, true_image_shapes)
     expected_proposal_boxes = [
         [[0, 0, .5, .5], [.5, .5, 1, 1]], [[0, .5, .5, 1], [.5, 0, 1, .5]]]
     expected_proposal_scores = [[1, 1],
@@ -1082,7 +1141,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
               detections['detection_scores'], detections['detection_classes'],
               detections['raw_detection_boxes'],
               detections['raw_detection_scores'],
-              detections['detection_multiclass_scores'])
+              detections['detection_multiclass_scores'],
+              detections['detection_anchor_indices'])
 
     proposal_boxes = np.array(
         [[[1, 1, 2, 3],
@@ -1110,6 +1170,7 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                                  [images, refined_box_encodings,
                                   class_predictions_with_background,
                                   num_proposals, proposal_boxes])
+    # Note that max_total_detections=5 in the NMS config.
     expected_num_detections = [5, 4]
     expected_detection_classes = [[0, 0, 0, 1, 1], [0, 0, 1, 1, 0]]
     expected_detection_scores = [[1, 1, 1, 1, 1], [1, 1, 1, 1, 0]]
@@ -1123,6 +1184,10 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                                    [1, 1, 1],
                                    [1, 1, 1],
                                    [0, 0, 0]]]
+    # Note that a single anchor can be used for multiple detections (predictions
+    # are made independently per class).
+    expected_anchor_indices = [[0, 1, 2, 0, 1],
+                               [0, 1, 0, 1]]
 
     h = float(image_shape[1])
     w = float(image_shape[2])
@@ -1143,6 +1208,8 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
                           expected_detection_classes[indx][0:num_proposals])
       self.assertAllClose(results[6][indx][0:num_proposals],
                           expected_multiclass_scores[indx][0:num_proposals])
+      self.assertAllClose(results[7][indx][0:num_proposals],
+                          expected_anchor_indices[indx][0:num_proposals])
 
     self.assertAllClose(results[4], expected_raw_detection_boxes)
     self.assertAllClose(results[5],
@@ -1905,8 +1972,9 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
     with test_graph_classification.as_default():
       image = tf.placeholder(dtype=tf.float32, shape=[1, 20, 20, 3])
       with tf.variable_scope('mock_model'):
-        net = slim.conv2d(image, num_outputs=3, kernel_size=1, scope='layer1')
-        slim.conv2d(net, num_outputs=3, kernel_size=1, scope='layer2')
+        net = contrib_slim.conv2d(
+            image, num_outputs=3, kernel_size=1, scope='layer1')
+        contrib_slim.conv2d(net, num_outputs=3, kernel_size=1, scope='layer2')
 
       init_op = tf.global_variables_initializer()
       saver = tf.train.Saver()
@@ -1984,10 +2052,12 @@ class FasterRCNNMetaArchTestBase(test_case.TestCase, parameterized.TestCase):
       with self.test_session(graph=test_graph_detection2) as sess:
         saver.restore(sess, saved_model_path)
         uninitialized_vars_list = sess.run(tf.report_uninitialized_variables())
-        self.assertIn('another_variable', uninitialized_vars_list)
+        self.assertIn(six.b('another_variable'), uninitialized_vars_list)
         for var in uninitialized_vars_list:
-          self.assertNotIn(model2.first_stage_feature_extractor_scope, var)
-          self.assertNotIn(model2.second_stage_feature_extractor_scope, var)
+          self.assertNotIn(
+              six.b(model2.first_stage_feature_extractor_scope), var)
+          self.assertNotIn(
+              six.b(model2.second_stage_feature_extractor_scope), var)
 
   @parameterized.parameters(
       {'use_keras': True},

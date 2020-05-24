@@ -33,7 +33,14 @@ from object_detection.utils import ops
 from object_detection.utils import test_case
 from object_detection.utils import test_utils
 
-slim = tf.contrib.slim
+# pylint: disable=g-import-not-at-top
+try:
+  from tensorflow.contrib import slim as contrib_slim
+except ImportError:
+  # TF 2.0 doesn't ship with contrib.
+  pass
+# pylint: enable=g-import-not-at-top
+
 keras = tf.keras.layers
 
 
@@ -53,7 +60,7 @@ class FakeSSDFeatureExtractor(ssd_meta_arch.SSDFeatureExtractor):
 
   def extract_features(self, preprocessed_inputs):
     with tf.variable_scope('mock_model'):
-      features = slim.conv2d(
+      features = contrib_slim.conv2d(
           inputs=preprocessed_inputs,
           num_outputs=32,
           kernel_size=1,
@@ -129,7 +136,8 @@ class SSDMetaArchTestBase(test_case.TestCase):
       predict_mask=False,
       use_static_shapes=False,
       nms_max_size_per_class=5,
-      calibration_mapping_value=None):
+      calibration_mapping_value=None,
+      return_raw_detections_during_predict=False):
     is_training = False
     num_classes = 1
     mock_anchor_generator = MockAnchorGenerator2x2()
@@ -238,6 +246,8 @@ class SSDMetaArchTestBase(test_case.TestCase):
         add_background_class=add_background_class,
         random_example_sampler=random_example_sampler,
         expected_loss_weights_fn=expected_loss_weights_fn,
+        return_raw_detections_during_predict=(
+            return_raw_detections_during_predict),
         **kwargs)
     return model, num_classes, mock_anchor_generator.num_anchors(), code_size
 

@@ -1,6 +1,9 @@
+![TensorFlow Requirement: 1.x](https://img.shields.io/badge/TensorFlow%20Requirement-1.x-brightgreen)
+![TensorFlow 2 Not Supported](https://img.shields.io/badge/TensorFlow%202%20Not%20Supported-%E2%9C%95-red.svg)
+
 # TensorFlow-Slim image classification model library
 
-[TF-slim](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/slim)
+[TF-slim](https://github.com/tensorflow/models/tree/master/research/slim)
 is a new lightweight high-level API of TensorFlow (`tensorflow.contrib.slim`)
 for defining, training and evaluating complex
 models. This directory contains
@@ -15,15 +18,15 @@ data reading and queueing utilities. You can easily train any model on any of
 these datasets, as we demonstrate below. We've also included a
 [jupyter notebook](https://github.com/tensorflow/models/blob/master/research/slim/slim_walkthrough.ipynb),
 which provides working examples of how to use TF-Slim for image classification.
-For developing or modifying your own models, see also the [main TF-Slim page](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/slim).
+For developing or modifying your own models, see also the [main TF-Slim page](https://github.com/tensorflow/models/tree/master/research/slim).
 
 ## Contacts
 
 Maintainers of TF-slim:
 
+* Sergio Guadarrama, GitHub: [sguada](https://github.com/sguada)
 * Nathan Silberman,
-  github: [nathansilberman](https://github.com/nathansilberman)
-* Sergio Guadarrama, github: [sguada](https://github.com/sguada)
+  GitHub: [nathansilberman](https://github.com/nathansilberman)
 
 ## Citation
 "TensorFlow-Slim image classification model library"
@@ -131,15 +134,11 @@ These represent the training and validation data, sharded over 5 files each.
 You will also find the `$DATA_DIR/labels.txt` file which contains the mapping
 from integer labels to class names.
 
-You can use the same script to create the mnist and cifar10 datasets.
-However, for ImageNet, you have to follow the instructions
+You can use the same script to create the mnist, cifar10 and visualwakewords
+datasets. However, for ImageNet, you have to follow the instructions
 [here](https://github.com/tensorflow/models/blob/master/research/inception/README.md#getting-started).
-Note that you first have to sign up for an account at image-net.org.
-Also, the download can take several hours, and could use up to 500GB.
-For the visualwakewords dataset, you need to download the MSCOCO dataset [here](https://github.com/tensorflow/models/blob/master/research/slim/datasets/download_mscoco.sh)
-and build TFRecords with the following instructions
-[here](https://github.com/tensorflow/models/blob/master/research/slim/datasets/build_visualwakewords_data.py).
-
+Note that you first have to sign up for an account at image-net.org. Also, the
+download can take several hours, and could use up to 500GB.
 
 ## Creating a TF-Slim Dataset Descriptor.
 
@@ -149,12 +148,12 @@ which stores pointers to the data file, as well as various other pieces of
 metadata, such as the class labels, the train/test split, and how to parse the
 TFExample protos. We have included the TF-Slim Dataset descriptors
 for
-[Cifar10](https://github.com/tensorflow/models/blob/master/research/slim/datasets/cifar10.py),
-[ImageNet](https://github.com/tensorflow/models/blob/master/research/slim/datasets/imagenet.py),
 [Flowers](https://github.com/tensorflow/models/blob/master/research/slim/datasets/flowers.py),
-[VisualWakeWords](https://github.com/tensorflow/models/blob/master/research/slim/datasets/visualwakewords.py),
+[Cifar10](https://github.com/tensorflow/models/blob/master/research/slim/datasets/cifar10.py),
+[MNIST](https://github.com/tensorflow/models/blob/master/research/slim/datasets/mnist.py),
+[ImageNet](https://github.com/tensorflow/models/blob/master/research/slim/datasets/imagenet.py)
 and
-[MNIST](https://github.com/tensorflow/models/blob/master/research/slim/datasets/mnist.py).
+[VisualWakeWords](https://github.com/tensorflow/models/blob/master/research/slim/datasets/visualwakewords.py),
 An example of how to load data using a TF-Slim dataset descriptor using a
 TF-Slim
 [DatasetDataProvider](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/slim/python/slim/data/dataset_data_provider.py)
@@ -183,7 +182,7 @@ format.
 
 The TFRecord format consists of a set of sharded files where each entry is a serialized `tf.Example` proto. Each `tf.Example` proto contains the ImageNet image (JPEG encoded) as well as metadata such as label and bounding box information.
 
-We provide a single [script](datasets/download_and_preprocess_imagenet.sh) for
+We provide a single [script](datasets/download_and_convert_imagenet.sh) for
 downloading and converting ImageNet data to TFRecord format. Downloading and
 preprocessing the data may take several hours (up to half a day) depending on
 your network and computer speed. Please be patient.

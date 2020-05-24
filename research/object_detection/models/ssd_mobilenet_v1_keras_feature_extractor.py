@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2017 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,6 +17,7 @@
 """SSDFeatureExtractor for Keras MobilenetV1 features."""
 
 import tensorflow as tf
+from tensorflow.contrib import slim as contrib_slim
 
 from object_detection.meta_architectures import ssd_meta_arch
 from object_detection.models import feature_map_generators
@@ -23,7 +25,7 @@ from object_detection.models.keras_models import mobilenet_v1
 from object_detection.utils import ops
 from object_detection.utils import shape_utils
 
-slim = tf.contrib.slim
+slim = contrib_slim
 
 
 class SSDMobileNetV1KerasFeatureExtractor(
@@ -163,4 +165,4 @@ class SSDMobileNetV1KerasFeatureExtractor(
         'Conv2d_11_pointwise': image_features[0],
         'Conv2d_13_pointwise': image_features[1]})
 
-    return feature_maps.values()
+    return list(feature_maps.values())

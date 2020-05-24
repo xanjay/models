@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2017 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +20,7 @@ Based on PNASNet ImageNet model: https://arxiv.org/abs/1712.00559
 """
 
 import tensorflow as tf
+from tensorflow.contrib import slim as contrib_slim
 
 from object_detection.meta_architectures import ssd_meta_arch
 from object_detection.models import feature_map_generators
@@ -27,7 +29,7 @@ from object_detection.utils import ops
 from object_detection.utils import variables_helper
 from nets.nasnet import pnasnet
 
-slim = tf.contrib.slim
+slim = contrib_slim
 
 
 def pnasnet_large_arg_scope_for_detection(is_batch_norm_training=False):
@@ -153,7 +155,7 @@ class SSDPNASNetFeatureExtractor(ssd_meta_arch.SSDFeatureExtractor):
             insert_1x1_conv=True,
             image_features=image_features)
 
-    return feature_maps.values()
+    return list(feature_maps.values())
 
   def restore_from_classification_checkpoint_fn(self, feature_extractor_scope):
     """Returns a map of variables to load from a foreign checkpoint.

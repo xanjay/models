@@ -57,6 +57,23 @@ class LabelMapUtilTest(tf.test.TestCase):
     self.assertEqual(label_map_dict['dog'], 1)
     self.assertEqual(label_map_dict['cat'], 2)
 
+  def test_get_label_map_dict_from_proto(self):
+    label_map_string = """
+      item {
+        id:2
+        name:'cat'
+      }
+      item {
+        id:1
+        name:'dog'
+      }
+    """
+    label_map_proto = text_format.Parse(
+        label_map_string, string_int_label_map_pb2.StringIntLabelMap())
+    label_map_dict = label_map_util.get_label_map_dict(label_map_proto)
+    self.assertEqual(label_map_dict['dog'], 1)
+    self.assertEqual(label_map_dict['cat'], 2)
+
   def test_get_label_map_dict_display(self):
     label_map_string = """
       item {
@@ -208,6 +225,59 @@ class LabelMapUtilTest(tf.test.TestCase):
         'id': 3
     }]
     self.assertListEqual(expected_categories_list, categories)
+
+  def test_convert_label_map_with_keypoints_to_categories(self):
+    label_map_str = """
+      item {
+        id: 1
+        name: 'person'
+        keypoints: {
+          id: 1
+          label: 'nose'
+        }
+        keypoints: {
+          id: 2
+          label: 'ear'
+        }
+      }
+    """
+    label_map_proto = string_int_label_map_pb2.StringIntLabelMap()
+    text_format.Merge(label_map_str, label_map_proto)
+    categories = label_map_util.convert_label_map_to_categories(
+        label_map_proto, max_num_classes=1)
+    self.assertEqual('person', categories[0]['name'])
+    self.assertEqual(1, categories[0]['id'])
+    self.assertEqual(1, categories[0]['keypoints']['nose'])
+    self.assertEqual(2, categories[0]['keypoints']['ear'])
+
+  def test_disallow_duplicate_keypoint_ids(self):
+    label_map_str = """
+      item {
+        id: 1
+        name: 'person'
+        keypoints: {
+          id: 1
+          label: 'right_elbow'
+        }
+        keypoints: {
+          id: 1
+          label: 'left_elbow'
+        }
+      }
+      item {
+        id: 2
+        name: 'face'
+        keypoints: {
+          id: 3
+          label: 'ear'
+        }
+      }
+    """
+    label_map_proto = string_int_label_map_pb2.StringIntLabelMap()
+    text_format.Merge(label_map_str, label_map_proto)
+    with self.assertRaises(ValueError):
+      label_map_util.convert_label_map_to_categories(
+          label_map_proto, max_num_classes=2)
 
   def test_convert_label_map_to_categories_with_few_classes(self):
     label_map_proto = self._generate_label_map(num_classes=4)

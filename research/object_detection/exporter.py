@@ -17,7 +17,6 @@
 import os
 import tempfile
 import tensorflow as tf
-from tensorflow.contrib.quantize.python import graph_matcher
 from tensorflow.core.protobuf import saver_pb2
 from tensorflow.python.tools import freeze_graph  # pylint: disable=g-direct-tensorflow-import
 from object_detection.builders import graph_rewriter_builder
@@ -27,7 +26,15 @@ from object_detection.data_decoders import tf_example_decoder
 from object_detection.utils import config_util
 from object_detection.utils import shape_utils
 
-slim = tf.contrib.slim
+# pylint: disable=g-import-not-at-top
+try:
+  from tensorflow.contrib import slim
+  from tensorflow.contrib import tfprof as contrib_tfprof
+  from tensorflow.contrib.quantize.python import graph_matcher
+except ImportError:
+  # TF 2.0 doesn't ship with contrib.
+  pass
+# pylint: enable=g-import-not-at-top
 
 freeze_graph_with_def_protos = freeze_graph.freeze_graph_with_def_protos
 
@@ -40,50 +47,64 @@ def rewrite_nn_resize_op(is_quantized=False):
   Args:
     is_quantized: True if the default graph is quantized.
   """
-  input_pattern = graph_matcher.OpTypePattern(
-      'FakeQuantWithMinMaxVars' if is_quantized else '*')
-  reshape_1_pattern = graph_matcher.OpTypePattern(
-      'Reshape', inputs=[input_pattern, 'Const'], ordered_inputs=False)
-  mul_pattern = graph_matcher.OpTypePattern(
-      'Mul', inputs=[reshape_1_pattern, 'Const'], ordered_inputs=False)
-  # The quantization script may or may not insert a fake quant op after the
-  # Mul. In either case, these min/max vars are not needed once replaced with
-  # the TF version of NN resize.
-  fake_quant_pattern = graph_matcher.OpTypePattern(
-      'FakeQuantWithMinMaxVars',
-      inputs=[mul_pattern, 'Identity', 'Identity'],
-      ordered_inputs=False)
-  reshape_2_pattern = graph_matcher.OpTypePattern(
-      'Reshape',
-      inputs=[graph_matcher.OneofPattern([fake_quant_pattern, mul_pattern]),
-              'Const'],
-      ordered_inputs=False)
-  add_type_name = 'Add'
-  if tf.compat.forward_compatible(2019, 6, 26):
-    add_type_name = 'AddV2'
-  add_pattern = graph_matcher.OpTypePattern(
-      add_type_name, inputs=[reshape_2_pattern, '*'], ordered_inputs=False)
+  def remove_nn():
+    """Remove nearest neighbor upsampling structures and replace with TF op."""
+    input_pattern = graph_matcher.OpTypePattern(
+        'FakeQuantWithMinMaxVars' if is_quantized else '*')
+    stack_1_pattern = graph_matcher.OpTypePattern(
+        'Pack', inputs=[input_pattern, input_pattern], ordered_inputs=False)
+    stack_2_pattern = graph_matcher.OpTypePattern(
+        'Pack', inputs=[stack_1_pattern, stack_1_pattern], ordered_inputs=False)
+    reshape_pattern = graph_matcher.OpTypePattern(
+        'Reshape', inputs=[stack_2_pattern, 'Const'], ordered_inputs=False)
+    consumer_pattern1 = graph_matcher.OpTypePattern(
+        'Add|AddV2|Max|Mul', inputs=[reshape_pattern, '*'],
+        ordered_inputs=False)
+    consumer_pattern2 = graph_matcher.OpTypePattern(
+        'StridedSlice', inputs=[reshape_pattern, '*', '*', '*'],
+        ordered_inputs=False)
 
-  matcher = graph_matcher.GraphMatcher(add_pattern)
-  for match in matcher.match_graph(tf.get_default_graph()):
-    projection_op = match.get_op(input_pattern)
-    reshape_2_op = match.get_op(reshape_2_pattern)
-    add_op = match.get_op(add_pattern)
-    nn_resize = tf.image.resize_nearest_neighbor(
-        projection_op.outputs[0],
-        add_op.outputs[0].shape.dims[1:3],
-        align_corners=False,
-        name=os.path.split(reshape_2_op.name)[0] + '/resize_nearest_neighbor')
+    def replace_matches(consumer_pattern):
+      """Search for nearest neighbor pattern and replace with TF op."""
+      match_counter = 0
+      matcher = graph_matcher.GraphMatcher(consumer_pattern)
+      for match in matcher.match_graph(tf.get_default_graph()):
+        match_counter += 1
+        projection_op = match.get_op(input_pattern)
+        reshape_op = match.get_op(reshape_pattern)
+        consumer_op = match.get_op(consumer_pattern)
+        nn_resize = tf.image.resize_nearest_neighbor(
+            projection_op.outputs[0],
+            reshape_op.outputs[0].shape.dims[1:3],
+            align_corners=False,
+            name=os.path.split(reshape_op.name)[0] + '/resize_nearest_neighbor')
 
-    for index, op_input in enumerate(add_op.inputs):
-      if op_input == reshape_2_op.outputs[0]:
-        add_op._update_input(index, nn_resize)  # pylint: disable=protected-access
-        break
+        for index, op_input in enumerate(consumer_op.inputs):
+          if op_input == reshape_op.outputs[0]:
+            consumer_op._update_input(index, nn_resize)  # pylint: disable=protected-access
+            break
+
+      return match_counter
+
+    match_counter = replace_matches(consumer_pattern1)
+    match_counter += replace_matches(consumer_pattern2)
+
+    tf.logging.info('Found and fixed {} matches'.format(match_counter))
+    return match_counter
+
+  # Applying twice because both inputs to Add could be NN pattern
+  total_removals = 0
+  while remove_nn():
+    total_removals += 1
+    # This number is chosen based on the nas-fpn architecture.
+    if total_removals > 4:
+      raise ValueError('Graph removal encountered a infinite loop.')
 
 
 def replace_variable_values_with_moving_averages(graph,
                                                  current_checkpoint_file,
-                                                 new_checkpoint_file):
+                                                 new_checkpoint_file,
+                                                 no_ema_collection=None):
   """Replaces variable values in the checkpoint with their moving averages.
 
   If the current checkpoint has shadow variables maintaining moving averages of
@@ -95,10 +116,14 @@ def replace_variable_values_with_moving_averages(graph,
     current_checkpoint_file: a checkpoint containing both original variables and
       their moving averages.
     new_checkpoint_file: file path to write a new checkpoint.
+    no_ema_collection: A list of namescope substrings to match the variables
+      to eliminate EMA.
   """
   with graph.as_default():
     variable_averages = tf.train.ExponentialMovingAverage(0.0)
     ema_variables_to_restore = variable_averages.variables_to_restore()
+    ema_variables_to_restore = config_util.remove_unecessary_ema(
+        ema_variables_to_restore, no_ema_collection)
     with tf.Session() as sess:
       read_saver = tf.train.Saver(ema_variables_to_restore)
       read_saver.restore(sess, current_checkpoint_file)
@@ -115,8 +140,11 @@ def _image_tensor_input_placeholder(input_shape=None):
   return input_tensor, input_tensor
 
 
-def _tf_example_input_placeholder():
+def _tf_example_input_placeholder(input_shape=None):
   """Returns input that accepts a batch of strings with tf examples.
+
+  Args:
+    input_shape: the shape to resize the output decoded images to (optional).
 
   Returns:
     a tuple of input placeholder and the output decoded images.
@@ -127,6 +155,8 @@ def _tf_example_input_placeholder():
     tensor_dict = tf_example_decoder.TfExampleDecoder().decode(
         tf_example_string_tensor)
     image_tensor = tensor_dict[fields.InputDataFields.image]
+    if input_shape is not None:
+      image_tensor = tf.image.resize(image_tensor, input_shape[1:3])
     return image_tensor
   return (batch_tf_example_placeholder,
           shape_utils.static_or_dynamic_map_fn(
@@ -137,8 +167,11 @@ def _tf_example_input_placeholder():
               back_prop=False))
 
 
-def _encoded_image_string_tensor_input_placeholder():
+def _encoded_image_string_tensor_input_placeholder(input_shape=None):
   """Returns input that accepts a batch of PNG or JPEG strings.
+
+  Args:
+    input_shape: the shape to resize the output decoded images to (optional).
 
   Returns:
     a tuple of input placeholder and the output decoded images.
@@ -151,6 +184,8 @@ def _encoded_image_string_tensor_input_placeholder():
     image_tensor = tf.image.decode_image(encoded_image_string_tensor,
                                          channels=3)
     image_tensor.set_shape((None, None, 3))
+    if input_shape is not None:
+      image_tensor = tf.image.resize(image_tensor, input_shape[1:3])
     return image_tensor
   return (batch_image_str_placeholder,
           tf.map_fn(
@@ -347,8 +382,11 @@ def build_detection_graph(input_type, detection_model, input_shape,
     raise ValueError('Unknown input type: {}'.format(input_type))
   placeholder_args = {}
   if input_shape is not None:
-    if input_type != 'image_tensor':
-      raise ValueError('Can only specify input shape for `image_tensor` '
+    if (input_type != 'image_tensor' and
+        input_type != 'encoded_image_string_tensor' and
+        input_type != 'tf_example'):
+      raise ValueError('Can only specify input shape for `image_tensor`, '
+                       '`encoded_image_string_tensor`, or `tf_example` '
                        'inputs.')
     placeholder_args['input_shape'] = input_shape
   placeholder_tensor, input_tensors = input_placeholder_fn_map[input_type](
@@ -503,8 +541,8 @@ def profile_inference_graph(graph):
     graph: the inference graph.
   """
   tfprof_vars_option = (
-      tf.contrib.tfprof.model_analyzer.TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
-  tfprof_flops_option = tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS
+      contrib_tfprof.model_analyzer.TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
+  tfprof_flops_option = contrib_tfprof.model_analyzer.FLOAT_OPS_OPTIONS
 
   # Batchnorm is usually folded during inference.
   tfprof_vars_option['trim_name_regexes'] = ['.*BatchNorm.*']
@@ -513,10 +551,8 @@ def profile_inference_graph(graph):
       '.*BatchNorm.*', '.*Initializer.*', '.*Regularizer.*', '.*BiasAdd.*'
   ]
 
-  tf.contrib.tfprof.model_analyzer.print_model_analysis(
-      graph,
-      tfprof_options=tfprof_vars_option)
+  contrib_tfprof.model_analyzer.print_model_analysis(
+      graph, tfprof_options=tfprof_vars_option)
 
-  tf.contrib.tfprof.model_analyzer.print_model_analysis(
-      graph,
-      tfprof_options=tfprof_flops_option)
+  contrib_tfprof.model_analyzer.print_model_analysis(
+      graph, tfprof_options=tfprof_flops_option)

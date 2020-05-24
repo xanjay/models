@@ -1,9 +1,10 @@
 # Tensorflow detection model zoo
 
 We provide a collection of detection models pre-trained on the [COCO
-dataset](http://mscoco.org), the [Kitti dataset](http://www.cvlibs.net/datasets/kitti/),
-the [Open Images dataset](https://github.com/openimages/dataset), the
-[AVA v2.1 dataset](https://research.google.com/ava/) and the
+dataset](http://cocodataset.org), the [Kitti dataset](http://www.cvlibs.net/datasets/kitti/),
+the
+[Open Images dataset](https://storage.googleapis.com/openimages/web/index.html),
+the [AVA v2.1 dataset](https://research.google.com/ava/) and the
 [iNaturalist Species Detection Dataset](https://github.com/visipedia/inat_comp/blob/master/2017/README.md#bounding-boxes).
 These models can be useful for out-of-the-box inference if you are interested in
 categories already in those datasets. They are also useful for initializing your
@@ -35,17 +36,20 @@ tar -xzvf ssd_mobilenet_v1_coco.tar.gz
 
 Inside the un-tar'ed directory, you will find:
 
-* a graph proto (`graph.pbtxt`)
-* a checkpoint
-  (`model.ckpt.data-00000-of-00001`, `model.ckpt.index`, `model.ckpt.meta`)
-* a frozen graph proto with weights baked into the graph as constants
-  (`frozen_inference_graph.pb`) to be used for out of the box inference
-    (try this out in the Jupyter notebook!)
-* a config file (`pipeline.config`) which was used to generate the graph.  These
-  directly correspond to a config file in the
-  [samples/configs](https://github.com/tensorflow/models/tree/master/research/object_detection/samples/configs)) directory but often with a modified score threshold.  In the case
-  of the heavier Faster R-CNN models, we also provide a version of the model
-  that uses a highly reduced number of proposals for speed.
+*   a graph proto (`graph.pbtxt`)
+*   a checkpoint (`model.ckpt.data-00000-of-00001`, `model.ckpt.index`,
+    `model.ckpt.meta`)
+*   a frozen graph proto with weights baked into the graph as constants
+    (`frozen_inference_graph.pb`) to be used for out of the box inference (try
+    this out in the Jupyter notebook!)
+*   a config file (`pipeline.config`) which was used to generate the graph.
+    These directly correspond to a config file in the
+    [samples/configs](https://github.com/tensorflow/models/tree/master/research/object_detection/samples/configs))
+    directory but often with a modified score threshold. In the case of the
+    heavier Faster R-CNN models, we also provide a version of the model that
+    uses a highly reduced number of proposals for speed.
+*   Mobile model only: a TfLite file (`model.tflite`) that can be deployed on
+    mobile devices.
 
 Some remarks on frozen inference graphs:
 
@@ -99,6 +103,20 @@ Some remarks on frozen inference graphs:
 Note: The asterisk (☆) at the end of model name indicates that this model supports TPU training.
 
 Note: If you download the tar.gz file of quantized models and un-tar, you will get different set of files - a checkpoint, a config file and tflite frozen graphs (txt/binary).
+
+
+### Mobile models
+
+Model name                                                                                                                                                                | Pixel 1 Latency (ms) | COCO mAP | Outputs
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------: | :------: | :-----:
+[ssd_mobilenet_v2_mnasfpn_coco](http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v2_mnasfpn_shared_box_predictor_320x320_coco_sync_2020_05_06.tar.gz) | 183                  | 26.6     | Boxes
+[ssd_mobilenet_v3_large_coco](http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v3_large_coco_2020_01_14.tar.gz)                                       | 119                  | 22.6     | Boxes
+[ssd_mobilenet_v3_small_coco](http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v3_small_coco_2020_01_14.tar.gz)                                       | 43                   | 15.4     | Boxes
+
+### Pixel4 Edge TPU models
+Model name                                                                                                                          | Pixel 4  Edge TPU Latency (ms) | COCO mAP | Outputs
+----------------------------------------------------------------------------------------------------------------------------------- | :------------------: | :------: | :-----:
+[ssd_mobilenet_edgetpu_coco](https://storage.cloud.google.com/mobilenet_edgetpu/checkpoints/ssdlite_mobilenet_edgetpu_coco_quant.tar.gz) | 6.6                  | 24.3     | Boxes
 
 ## Kitti-trained models
 

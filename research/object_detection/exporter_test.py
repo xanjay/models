@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2017 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +15,9 @@
 # ==============================================================================
 
 """Tests for object_detection.export_inference_graph."""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import os
 import numpy as np
 import six
@@ -21,6 +25,7 @@ import tensorflow as tf
 from google.protobuf import text_format
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
+from tensorflow.python.tools import strip_unused_lib
 from object_detection import exporter
 from object_detection.builders import graph_rewriter_builder
 from object_detection.builders import model_builder
@@ -35,7 +40,13 @@ if six.PY2:
 else:
   from unittest import mock  # pylint: disable=g-import-not-at-top
 
-slim = tf.contrib.slim
+# pylint: disable=g-import-not-at-top
+try:
+  from tensorflow.contrib import slim as contrib_slim
+except ImportError:
+  # TF 2.0 doesn't ship with contrib.
+  pass
+# pylint: enable=g-import-not-at-top
 
 
 class FakeModel(model.DetectionModel):
@@ -54,7 +65,7 @@ class FakeModel(model.DetectionModel):
     return {'image': tf.layers.conv2d(preprocessed_inputs, 3, 1)}
 
   def postprocess(self, prediction_dict, true_image_shapes):
-    with tf.control_dependencies(prediction_dict.values()):
+    with tf.control_dependencies(list(prediction_dict.values())):
       postprocessed_tensors = {
           'detection_boxes': tf.constant([[[0.0, 0.0, 0.5, 0.5],
                                            [0.5, 0.5, 0.8, 0.8]],
@@ -134,7 +145,7 @@ class ExportInferenceGraphTest(tf.test.TestCase):
     od_graph = tf.Graph()
     with od_graph.as_default():
       od_graph_def = tf.GraphDef()
-      with tf.gfile.GFile(inference_graph_path) as fid:
+      with tf.gfile.GFile(inference_graph_path, mode='rb') as fid:
         if is_binary:
           od_graph_def.ParseFromString(fid.read())
         else:
@@ -146,7 +157,9 @@ class ExportInferenceGraphTest(tf.test.TestCase):
     with self.test_session():
       encoded_image = tf.image.encode_jpeg(tf.constant(image_array)).eval()
     def _bytes_feature(value):
-      return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+      return tf.train.Feature(
+          bytes_list=tf.train.BytesList(value=[six.ensure_binary(value)]))
+
     example = tf.train.Example(features=tf.train.Features(feature={
         'image/encoded': _bytes_feature(encoded_image),
         'image/format': _bytes_feature('jpg'),
@@ -245,6 +258,29 @@ class ExportInferenceGraphTest(tf.test.TestCase):
       self.assertTrue(os.path.exists(os.path.join(
           output_directory, 'saved_model', 'saved_model.pb')))
 
+  def test_export_graph_with_fixed_size_tf_example_input(self):
+    input_shape = [1, 320, 320, 3]
+
+    tmp_dir = self.get_temp_dir()
+    trained_checkpoint_prefix = os.path.join(tmp_dir, 'model.ckpt')
+    self._save_checkpoint_from_mock_model(
+        trained_checkpoint_prefix, use_moving_averages=False)
+    with mock.patch.object(
+        model_builder, 'build', autospec=True) as mock_builder:
+      mock_builder.return_value = FakeModel()
+      output_directory = os.path.join(tmp_dir, 'output')
+      pipeline_config = pipeline_pb2.TrainEvalPipelineConfig()
+      pipeline_config.eval_config.use_moving_averages = False
+      exporter.export_inference_graph(
+          input_type='tf_example',
+          pipeline_config=pipeline_config,
+          trained_checkpoint_prefix=trained_checkpoint_prefix,
+          output_directory=output_directory,
+          input_shape=input_shape)
+      saved_model_path = os.path.join(output_directory, 'saved_model')
+      self.assertTrue(
+          os.path.exists(os.path.join(saved_model_path, 'saved_model.pb')))
+
   def test_export_graph_with_encoded_image_string_input(self):
     tmp_dir = self.get_temp_dir()
     trained_checkpoint_prefix = os.path.join(tmp_dir, 'model.ckpt')
@@ -263,6 +299,29 @@ class ExportInferenceGraphTest(tf.test.TestCase):
           output_directory=output_directory)
       self.assertTrue(os.path.exists(os.path.join(
           output_directory, 'saved_model', 'saved_model.pb')))
+
+  def test_export_graph_with_fixed_size_encoded_image_string_input(self):
+    input_shape = [1, 320, 320, 3]
+
+    tmp_dir = self.get_temp_dir()
+    trained_checkpoint_prefix = os.path.join(tmp_dir, 'model.ckpt')
+    self._save_checkpoint_from_mock_model(
+        trained_checkpoint_prefix, use_moving_averages=False)
+    with mock.patch.object(
+        model_builder, 'build', autospec=True) as mock_builder:
+      mock_builder.return_value = FakeModel()
+      output_directory = os.path.join(tmp_dir, 'output')
+      pipeline_config = pipeline_pb2.TrainEvalPipelineConfig()
+      pipeline_config.eval_config.use_moving_averages = False
+      exporter.export_inference_graph(
+          input_type='encoded_image_string_tensor',
+          pipeline_config=pipeline_config,
+          trained_checkpoint_prefix=trained_checkpoint_prefix,
+          output_directory=output_directory,
+          input_shape=input_shape)
+      saved_model_path = os.path.join(output_directory, 'saved_model')
+      self.assertTrue(
+          os.path.exists(os.path.join(saved_model_path, 'saved_model.pb')))
 
   def _get_variables_in_checkpoint(self, checkpoint_file):
     return set([
@@ -354,7 +413,7 @@ class ExportInferenceGraphTest(tf.test.TestCase):
     self._load_inference_graph(inference_graph_path, is_binary=False)
     has_quant_nodes = False
     for v in variables_helper.get_global_variables_safely():
-      if v.op.name.endswith('act_quant/min'):
+      if six.ensure_str(v.op.name).endswith('act_quant/min'):
         has_quant_nodes = True
         break
     self.assertTrue(has_quant_nodes)
@@ -677,7 +736,7 @@ class ExportInferenceGraphTest(tf.test.TestCase):
           input_shape=None,
           output_collection_name='inference_op',
           graph_hook_fn=None)
-      output_node_names = ','.join(outputs.keys())
+      output_node_names = ','.join(list(outputs.keys()))
       saver = tf.train.Saver()
       input_saver_def = saver.as_saver_def()
       exporter.freeze_graph_with_def_protos(
@@ -830,7 +889,7 @@ class ExportInferenceGraphTest(tf.test.TestCase):
           input_shape=None,
           output_collection_name='inference_op',
           graph_hook_fn=None)
-      output_node_names = ','.join(outputs.keys())
+      output_node_names = ','.join(list(outputs.keys()))
       saver = tf.train.Saver()
       input_saver_def = saver.as_saver_def()
       frozen_graph_def = exporter.freeze_graph_with_def_protos(
@@ -1033,7 +1092,7 @@ class ExportInferenceGraphTest(tf.test.TestCase):
     g = tf.Graph()
     with g.as_default():
       x = array_ops.placeholder(dtypes.float32, shape=(8, 10, 10, 8))
-      x_conv = tf.contrib.slim.conv2d(x, 8, 1)
+      x_conv = contrib_slim.conv2d(x, 8, 1)
       y = array_ops.placeholder(dtypes.float32, shape=(8, 20, 20, 8))
       s = ops.nearest_neighbor_upsampling(x_conv, 2)
       t = s + y
@@ -1055,6 +1114,86 @@ class ExportInferenceGraphTest(tf.test.TestCase):
         break
 
     self.assertTrue(resize_op_found)
+
+  def test_rewrite_nn_resize_op_odd_size(self):
+    g = tf.Graph()
+    with g.as_default():
+      x = array_ops.placeholder(dtypes.float32, shape=(8, 10, 10, 8))
+      s = ops.nearest_neighbor_upsampling(x, 2)
+      t = s[:, :19, :19, :]
+      exporter.rewrite_nn_resize_op()
+
+    resize_op_found = False
+    for op in g.get_operations():
+      if op.type == 'ResizeNearestNeighbor':
+        resize_op_found = True
+        self.assertEqual(op.inputs[0], x)
+        self.assertEqual(op.outputs[0].consumers()[0], t.op)
+        break
+
+    self.assertTrue(resize_op_found)
+
+  def test_rewrite_nn_resize_op_quantized_odd_size(self):
+    g = tf.Graph()
+    with g.as_default():
+      x = array_ops.placeholder(dtypes.float32, shape=(8, 10, 10, 8))
+      x_conv = contrib_slim.conv2d(x, 8, 1)
+      s = ops.nearest_neighbor_upsampling(x_conv, 2)
+      t = s[:, :19, :19, :]
+
+      graph_rewriter_config = graph_rewriter_pb2.GraphRewriter()
+      graph_rewriter_config.quantization.delay = 500000
+      graph_rewriter_fn = graph_rewriter_builder.build(
+          graph_rewriter_config, is_training=False)
+      graph_rewriter_fn()
+
+      exporter.rewrite_nn_resize_op(is_quantized=True)
+
+    resize_op_found = False
+    for op in g.get_operations():
+      if op.type == 'ResizeNearestNeighbor':
+        resize_op_found = True
+        self.assertEqual(op.inputs[0].op.type, 'FakeQuantWithMinMaxVars')
+        self.assertEqual(op.outputs[0].consumers()[0], t.op)
+        break
+
+    self.assertTrue(resize_op_found)
+
+  def test_rewrite_nn_resize_op_multiple_path(self):
+    g = tf.Graph()
+    with g.as_default():
+      with tf.name_scope('nearest_upsampling'):
+        x = array_ops.placeholder(dtypes.float32, shape=(8, 10, 10, 8))
+        x_stack = tf.stack([tf.stack([x] * 2, axis=3)] * 2, axis=2)
+        x_reshape = tf.reshape(x_stack, [8, 20, 20, 8])
+
+      with tf.name_scope('nearest_upsampling'):
+        x_2 = array_ops.placeholder(dtypes.float32, shape=(8, 10, 10, 8))
+        x_stack_2 = tf.stack([tf.stack([x_2] * 2, axis=3)] * 2, axis=2)
+        x_reshape_2 = tf.reshape(x_stack_2, [8, 20, 20, 8])
+
+      t = x_reshape + x_reshape_2
+
+      exporter.rewrite_nn_resize_op()
+
+    graph_def = g.as_graph_def()
+    graph_def = strip_unused_lib.strip_unused(
+        graph_def,
+        input_node_names=[
+            'nearest_upsampling/Placeholder', 'nearest_upsampling_1/Placeholder'
+        ],
+        output_node_names=['add'],
+        placeholder_type_enum=dtypes.float32.as_datatype_enum)
+
+    counter_resize_op = 0
+    t_input_ops = [op.name for op in t.op.inputs]
+    for node in graph_def.node:
+      # Make sure Stacks are replaced.
+      self.assertNotEqual(node.op, 'Pack')
+      if node.op == 'ResizeNearestNeighbor':
+        counter_resize_op += 1
+        self.assertIn(six.ensure_str(node.name) + ':0', t_input_ops)
+    self.assertEqual(counter_resize_op, 2)
 
 
 if __name__ == '__main__':

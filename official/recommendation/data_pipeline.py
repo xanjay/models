@@ -35,10 +35,11 @@ from six.moves import queue
 import tensorflow as tf
 from absl import logging
 
-from official.datasets import movielens
 from official.recommendation import constants as rconst
+from official.recommendation import movielens
 from official.recommendation import popen_helper
 from official.recommendation import stat_utils
+from tensorflow.python.tpu.datasets import StreamingFilesDataset
 
 
 SUMMARY_TEMPLATE = """General:
@@ -286,10 +287,6 @@ class DatasetManager(object):
 
       file_pattern = os.path.join(
           epoch_data_dir, rconst.SHARD_TEMPLATE.format("*"))
-      # TODO(seemuch): remove this contrib import
-      # pylint: disable=line-too-long
-      from tensorflow.contrib.tpu.python.tpu.datasets import StreamingFilesDataset
-      # pylint: enable=line-too-long
       dataset = StreamingFilesDataset(
           files=file_pattern, worker_job=popen_helper.worker_job(),
           num_parallel_reads=rconst.NUM_FILE_SHARDS, num_epochs=1,
@@ -334,7 +331,7 @@ class DatasetManager(object):
       """Returns batches for training."""
 
       # Estimator passes batch_size during training and eval_batch_size during
-      # eval. TPUEstimator only passes batch_size.
+      # eval.
       param_batch_size = (params["batch_size"] if self._is_training else
                           params.get("eval_batch_size") or params["batch_size"])
       if batch_size != param_batch_size:
@@ -428,7 +425,8 @@ class BaseDataConstructor(threading.Thread):
     self._shuffle_with_forkpool = not stream_files
     if stream_files:
       self._shard_root = epoch_dir or tempfile.mkdtemp(prefix="ncf_")
-      atexit.register(tf.io.gfile.rmtree, dirname=self._shard_root)
+      if not create_data_offline:
+        atexit.register(tf.io.gfile.rmtree, self._shard_root)
     else:
       self._shard_root = None
 
@@ -715,7 +713,7 @@ class DummyConstructor(threading.Thread):
       """Returns dummy input batches for training."""
 
       # Estimator passes batch_size during training and eval_batch_size during
-      # eval. TPUEstimator only passes batch_size.
+      # eval.
       batch_size = (params["batch_size"] if is_training else
                     params.get("eval_batch_size") or params["batch_size"])
       num_users = params["num_users"]

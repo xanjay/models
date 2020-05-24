@@ -217,11 +217,20 @@ def pad_to_max_size(features):
     true_feature_shapes: A 2D int32 tensor of shape [num_levels, 2] containing
       height and width of the feature maps before padding.
   """
-  heights = [tf.shape(feature)[1] for feature in features]
-  widths = [tf.shape(feature)[2] for feature in features]
-  max_height = tf.reduce_max(heights)
-  max_width = tf.reduce_max(widths)
+  if len(features) == 1:
+    return tf.expand_dims(features[0],
+                          1), tf.expand_dims(tf.shape(features[0])[1:3], 0)
 
+  if all([feature.shape.is_fully_defined() for feature in features]):
+    heights = [feature.shape[1] for feature in features]
+    widths = [feature.shape[2] for feature in features]
+    max_height = max(heights)
+    max_width = max(widths)
+  else:
+    heights = [tf.shape(feature)[1] for feature in features]
+    widths = [tf.shape(feature)[2] for feature in features]
+    max_height = tf.reduce_max(heights)
+    max_width = tf.reduce_max(widths)
   features_all = [
       tf.image.pad_to_bounding_box(feature, 0, 0, max_height,
                                    max_width) for feature in features
@@ -290,10 +299,11 @@ def multilevel_roi_align(features, boxes, box_levels, output_size,
 
   Args:
     features: A list of 4D float tensors of shape [batch_size, max_height,
-      max_width, channels] containing features.
+      max_width, channels] containing features. Note that each feature map must
+      have the same number of channels.
     boxes: A 3D float tensor of shape [batch_size, num_boxes, 4] containing
       boxes of the form [ymin, xmin, ymax, xmax] in normalized coordinates.
-    box_levels: A 3D int32 tensor of shape [batch_size, num_boxes, 1]
+    box_levels: A 3D int32 tensor of shape [batch_size, num_boxes]
       representing the feature level index for each box.
     output_size: An list of two integers [size_y, size_x] indicating the output
       feature size for each box.
@@ -404,7 +414,7 @@ def multilevel_roi_align(features, boxes, box_levels, output_size,
 def native_crop_and_resize(image, boxes, crop_size, scope=None):
   """Same as `matmul_crop_and_resize` but uses tf.image.crop_and_resize."""
   def get_box_inds(proposals):
-    proposals_shape = proposals.get_shape().as_list()
+    proposals_shape = proposals.shape.as_list()
     if any(dim is None for dim in proposals_shape):
       proposals_shape = tf.shape(proposals)
     ones_mat = tf.ones(proposals_shape[:2], dtype=tf.int32)

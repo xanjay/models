@@ -27,11 +27,10 @@ import numpy as np
 import scipy.stats
 import tensorflow as tf
 
-from official.datasets import movielens
 from official.recommendation import constants as rconst
 from official.recommendation import data_preprocessing
+from official.recommendation import movielens
 from official.recommendation import popen_helper
-from official.utils.misc import keras_utils
 
 
 DATASET = "ml-test"
@@ -59,8 +58,7 @@ def mock_download(*args, **kwargs):
 class BaseTest(tf.test.TestCase):
 
   def setUp(self):
-    if keras_utils.is_v2_0:
-      tf.compat.v1.disable_eager_execution()
+    tf.compat.v1.disable_eager_execution()
     self.temp_data_dir = self.get_temp_dir()
     ratings_folder = os.path.join(self.temp_data_dir, DATASET)
     tf.io.gfile.makedirs(ratings_folder)
@@ -95,8 +93,7 @@ class BaseTest(tf.test.TestCase):
 
     movielens.download = mock_download
     movielens.NUM_RATINGS[DATASET] = NUM_PTS
-    data_preprocessing.DATASET_TO_NUM_USERS_AND_ITEMS[DATASET] = (NUM_USERS,
-                                                                  NUM_ITEMS)
+    movielens.DATASET_TO_NUM_USERS_AND_ITEMS[DATASET] = (NUM_USERS, NUM_ITEMS)
 
   def make_params(self, train_epochs=1):
     return {
@@ -127,7 +124,7 @@ class BaseTest(tf.test.TestCase):
     # type: (tf.data.Dataset, tf.Graph) -> list
     with self.session(graph=g) as sess:
       with g.as_default():
-        batch = dataset.make_one_shot_iterator().get_next()
+        batch = tf.compat.v1.data.make_one_shot_iterator(dataset).get_next()
       output = []
       while True:
         try:
