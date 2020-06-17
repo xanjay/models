@@ -52,7 +52,7 @@ tf.app.flags.DEFINE_string(
     'output_dir', './deepfashion2/tfrecord',
     'Path to save converted tfrecord of Tensorflow example')
 
-_NUM_SHARDS = 4
+_NUM_SHARDS = 10
 
 
 def _convert_dataset(dataset_split, dataset_dir, dataset_label_dir):
